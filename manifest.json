@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "robzolkos.agent-usage",
+  "name": "Agent Usage",
+  "version": "0.1.0",
+  "author": "Rob Zolkos",
+  "license": "MIT",
+  "description": "Weekly Claude and Codex usage, reset countdowns, and prorated pace in the Omarchy bar.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Agent Usage",
+    "description": "Claude and Codex weekly usage and reset countdowns at a glance.",
+    "category": "AI",
+    "aliases": [
+      "agent-usage",
+      "claude-usage",
+      "codex-usage"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 300
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 60,
+        "max": 3600,
+        "step": 60,
+        "defaultValue": 300
+      }
+    ]
+  }
+}
