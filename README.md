@@ -55,6 +55,20 @@ The plugin refreshes every five minutes by default. Change the interval with:
 omarchy bar set robzolkos.agent-usage refreshIntervalSec 600 --json
 ```
 
+## Removal
+
+Remove the plugin with:
+
+```bash
+omarchy plugin remove robzolkos.agent-usage
+```
+
+Restore Omarchy's built-in Agents display if desired:
+
+```bash
+omarchy plugin enable omarchy.agents
+```
+
 ## License
 
 MIT
