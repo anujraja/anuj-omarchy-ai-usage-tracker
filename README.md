@@ -2,7 +2,13 @@
 
 An Omarchy bar plugin with one neutral AI icon and tabbed Claude, Codex, and Grok usage.
 
-![Agent Usage panel for Omarchy](preview.png)
+## Screenshots
+
+Clean captures from display 0:
+
+![Neutral AI usage icon in the Omarchy top bar](docs/screenshots/ai-usage-topbar.png)
+
+![Tabbed AI usage panel with model tokens and API-equivalent estimates](docs/screenshots/ai-usage-panel.png)
 
 ## What it shows
 
