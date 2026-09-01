@@ -8,7 +8,11 @@ Clean captures from display 0:
 
 ![Neutral AI usage icon in the Omarchy top bar](docs/screenshots/ai-usage-topbar.png)
 
-![Tabbed AI usage panel with model tokens and API-equivalent estimates](docs/screenshots/ai-usage-panel.png)
+Popup tabs, cropped directly from display 0:
+
+| Claude | Codex | Grok |
+|---|---|---|
+| ![Claude usage tab](docs/screenshots/ai-usage-claude.png) | ![Codex usage tab](docs/screenshots/ai-usage-codex.png) | ![Grok usage tab](docs/screenshots/ai-usage-grok.png) |
 
 ## What it shows
 
