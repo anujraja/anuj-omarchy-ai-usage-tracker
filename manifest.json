@@ -1,25 +1,27 @@
 {
   "schemaVersion": 1,
-  "id": "robzolkos.agent-usage",
-  "name": "Agent Usage",
+  "id": "anuj-omarchy-ai-usage-tracker",
+  "name": "Anuj Omarchy AI Usage Tracker",
   "version": "0.1.0",
   "author": "Rob Zolkos",
   "license": "MIT",
-  "description": "Weekly Claude and Codex usage, reset countdowns, and prorated pace in the Omarchy bar.",
+  "description": "Tabbed Claude, Codex, and Grok usage, limits, tokens by model, and API-equivalent estimates in one Omarchy bar icon.",
   "kinds": [
     "bar-widget"
   ],
   "entryPoints": {
     "barWidget": "Panel.qml"
   },
+  "assets": ["ai-robot.svg", "claude.svg", "codex.svg"],
   "barWidget": {
-    "displayName": "Agent Usage",
-    "description": "Claude and Codex weekly usage and reset countdowns at a glance.",
+    "displayName": "Anuj Omarchy AI Usage Tracker",
+    "description": "One AI usage icon with Claude, Codex, and Grok tabs plus model token usage and estimates.",
     "category": "AI",
     "aliases": [
       "agent-usage",
       "claude-usage",
-      "codex-usage"
+      "codex-usage",
+      "anuj-ai-usage"
     ],
     "allowMultiple": false,
     "defaultSection": "right",

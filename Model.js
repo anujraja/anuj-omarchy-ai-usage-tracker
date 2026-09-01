@@ -2,9 +2,32 @@
 
 var WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
+// USD per 1M tokens: API-equivalent reference rates, not subscription charges.
+var MODEL_PRICES = {
+  "gpt-5.6-luna": { input: 0.20, cached: 0.02, output: 1.20 },
+  "gpt-5.6-sol": { input: 4.00, cached: 0.40, output: 20.00 },
+  "gpt-5.6-terra": { input: 2.00, cached: 0.20, output: 12.00 },
+  "gpt-5.5": { input: 5.00, cached: 0.50, output: 30.00 },
+  "codex-auto-review": { input: 2.50, cached: 0.25, output: 15.00 }
+}
+
 function number(value, fallback) {
   var parsed = Number(value)
   return isFinite(parsed) ? parsed : fallback
+}
+
+function friendlyModelName(value) {
+  return String(value || "Model").replace(/[-_]+/g, " ").replace(/\b\w/g, function(letter) { return letter.toUpperCase() })
+}
+
+function estimateApiCost(bucket, modelId) {
+  var price = MODEL_PRICES[String(modelId || "")]
+  if (!price || !bucket) return null
+  var input = Math.max(0, number(bucket.inputTokens, 0))
+  var cached = Math.max(0, number(bucket.cacheReadInputTokens, 0))
+  var writes = Math.max(0, number(bucket.cacheCreationInputTokens, 0))
+  var output = Math.max(0, number(bucket.outputTokens, 0))
+  return (input * price.input + cached * price.cached + writes * price.input * 1.25 + output * price.output) / 1000000
 }
 
 function clamp(value, minimum, maximum) {
@@ -55,10 +78,12 @@ function parseProvider(stdout, providerId, nowMs) {
       provider: {
         id: String(providerId || raw.id || ""),
         name: String(raw.name || providerId || ""),
-        plan: String(raw.plan || ""),
+        plan: String(raw.plan || raw.tierLabel || ""),
         status: String(raw.usageStatusText || ""),
         weekly: weekly,
         limits: normalized,
+        modelUsage: raw.modelUsage || {},
+        modelUsage: raw.modelUsage || {},
         recentDays: Array.isArray(raw.recentDays) ? raw.recentDays : [],
         updatedAt: String(raw.updatedAt || "")
       }
@@ -153,7 +178,9 @@ var exportsObject = {
   recentTotal: recentTotal,
   recentPeak: recentPeak,
   tokenCount: tokenCount,
-  dayLabel: dayLabel
+  dayLabel: dayLabel,
+  friendlyModelName: friendlyModelName,
+  estimateApiCost: estimateApiCost
 }
 
 if (typeof module !== "undefined" && module.exports) module.exports = exportsObject

@@ -7,8 +7,9 @@ Item {
   id: root
 
   property var settings: ({})
-  property var claude: ({ id: "claude", name: "Claude", weekly: null, limits: [], recentDays: [], status: "Loading…" })
-  property var codex: ({ id: "codex", name: "Codex", weekly: null, limits: [], recentDays: [], status: "Loading…" })
+  property var claude: ({ id: "claude", name: "Claude", weekly: null, limits: [], modelUsage: {}, recentDays: [], status: "Loading…" })
+  property var codex: ({ id: "codex", name: "Codex", weekly: null, limits: [], modelUsage: {}, recentDays: [], status: "Loading…" })
+  property var grok: ({ id: "grok", name: "Grok", weekly: null, limits: [], modelUsage: {}, recentDays: [], status: "Loading…" })
   property bool refreshing: false
   property string lastError: ""
   property date lastUpdated: new Date(0)
@@ -19,6 +20,7 @@ Item {
   property string _codexError: ""
 
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 300, 60, 3600)
+  readonly property string grokRecord: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") || "") + "/.local/state") + "/omarchy/agents/usage/grok.json"
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
@@ -29,6 +31,19 @@ Item {
     var value = parseInt(String(setting(name, fallback)), 10)
     if (!isFinite(value)) value = fallback
     return Math.max(minimum, Math.min(maximum, value))
+  }
+
+  function loadGrok(content) {
+    var parsed = Model.parseProvider(String(content || ""), "grok", Date.now())
+    if (parsed.ok) root.grok = parsed.provider
+  }
+
+  FileView {
+    path: root.grokRecord
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.loadGrok(text())
+    onFileChanged: reload()
   }
 
   function conciseError(value, fallback) {
@@ -46,7 +61,9 @@ Item {
     _codexOutput = ""
     _codexError = ""
     claudeProcess.command = ["omarchy-agent-usage-claude", "--limits-only"]
-    codexProcess.command = ["omarchy-agent-usage-codex", "--limits-only"]
+    // Omarchy's packaged collector still passes the removed `untrusted`
+    // approval policy. Use the user compatibility collector explicitly.
+    codexProcess.command = ["/home/airking/.local/bin/omarchy-agent-usage-codex", "--limits-only"]
     claudeProcess.running = true
     codexProcess.running = true
   }

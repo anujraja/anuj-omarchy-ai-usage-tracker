@@ -9,8 +9,8 @@ import "Model.js" as Model
 
 Panel {
   id: root
-  moduleName: "robzolkos.agent-usage"
-  ipcTarget: "robzolkos.agent-usage"
+  moduleName: "anuj-omarchy-ai-usage-tracker"
+  ipcTarget: "anuj-omarchy-ai-usage-tracker"
   manageIpc: false
 
   property double nowMs: Date.now()
@@ -20,6 +20,9 @@ Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property bool alarming: Model.behindPace(service.claude.weekly, nowMs)
     || Model.behindPace(service.codex.weekly, nowMs)
+    || Model.behindPace(service.grok.weekly, nowMs)
+  property string selectedProviderId: "claude"
+  readonly property var activeProvider: providerById(selectedProviderId)
 
   implicitWidth: usageButton.implicitWidth
   implicitHeight: usageButton.implicitHeight
@@ -27,6 +30,21 @@ Panel {
   function refresh() {
     nowMs = Date.now()
     service.refresh()
+  }
+
+  function providerById(id) {
+    if (id === "codex") return service.codex
+    if (id === "grok") return service.grok
+    return service.claude
+  }
+
+  function providerLabel(provider) {
+    return provider && provider.name ? String(provider.name) : "AI"
+  }
+
+  function providerIcon(provider) {
+    return provider && provider.id === "claude"
+      ? Qt.resolvedUrl("claude.svg") : Qt.resolvedUrl("codex.svg")
   }
 
   onOpenedChanged: if (opened) {
@@ -74,6 +92,41 @@ Panel {
     }
   }
 
+  function modelRows(provider) {
+    var source = provider ? (provider.modelUsage || {}) : {}
+    var rows = []
+    for (var id in source) {
+      var bucket = source[id] || {}
+      var input = Number(bucket.inputTokens || 0)
+      var cached = Number(bucket.cacheReadInputTokens || 0)
+      var writes = Number(bucket.cacheCreationInputTokens || 0)
+      var output = Number(bucket.outputTokens || 0)
+      rows.push({
+        name: Model.friendlyModelName(id),
+        input: input,
+        cached: cached,
+        writes: writes,
+        output: output,
+        total: input + cached + writes + output,
+        cost: Model.estimateApiCost(bucket, id)
+      })
+    }
+    rows.sort(function(a, b) { return b.total - a.total })
+    return rows
+  }
+
+  function formatCost(value) {
+    if (value === null || value === undefined || !isFinite(Number(value))) return "n/a"
+    if (Number(value) < 0.01) return "<$0.01"
+    return "$" + Number(value).toFixed(2)
+  }
+
+  function modelDetail(row) {
+    return "in " + Model.tokenCount(row.input)
+      + " · cached " + Model.tokenCount(row.cached)
+      + " · out " + Model.tokenCount(row.output)
+  }
+
   WidgetButton {
     id: usageButton
     anchors.fill: parent
@@ -93,24 +146,10 @@ Panel {
       anchors.centerIn: parent
       spacing: Style.space(12)
 
-      ProviderChip {
-        provider: service.claude
-        iconSource: Qt.resolvedUrl("claude.svg")
-        tintIcon: false
-      }
-
-      Rectangle {
-        width: 1
-        height: Style.space(13)
-        anchors.verticalCenter: parent.verticalCenter
-        color: root.dim
-        opacity: 0.65
-      }
-
-      ProviderChip {
-        provider: service.codex
-        iconSource: Qt.resolvedUrl("codex.svg")
-        tintIcon: true
+      ProviderIcon {
+        source: Qt.resolvedUrl("ai-robot.svg")
+        tinted: true
+        iconSize: Style.space(18)
       }
     }
   }
@@ -160,20 +199,102 @@ Panel {
 
         PanelSeparator { width: parent.width; foreground: root.foreground }
 
-        ProviderCard {
+        RowLayout {
           width: parent.width
-          provider: service.claude
-          iconSource: Qt.resolvedUrl("claude.svg")
-          tintIcon: false
+          spacing: Style.space(6)
+          Repeater {
+            model: [service.claude, service.codex, service.grok]
+            delegate: Rectangle {
+              required property var modelData
+              required property int index
+              Layout.fillWidth: true
+              height: Style.space(34)
+              radius: Style.cornerRadius
+              color: root.selectedProviderId === modelData.id ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.16) : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.05)
+              border.color: root.selectedProviderId === modelData.id ? root.foreground : root.dim
+              border.width: 1
+              Text {
+                anchors.centerIn: parent
+                text: root.providerLabel(modelData)
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
+              }
+              MouseArea {
+                anchors.fill: parent
+                onClicked: root.selectedProviderId = modelData.id
+              }
+            }
+          }
         }
 
-        PanelSeparator { width: parent.width; foreground: root.foreground }
-
         ProviderCard {
           width: parent.width
-          provider: service.codex
-          iconSource: Qt.resolvedUrl("codex.svg")
-          tintIcon: true
+          provider: root.activeProvider
+          iconSource: root.providerIcon(root.activeProvider)
+          tintIcon: root.activeProvider && root.activeProvider.id !== "claude"
+        }
+
+        Column {
+          width: parent.width
+          visible: root.modelRows(root.activeProvider).length > 0
+          spacing: Style.space(6)
+
+          PanelSeparator { width: parent.width; foreground: root.foreground }
+
+          Text {
+            text: root.providerLabel(root.activeProvider) + " TOKENS BY MODEL"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            font.bold: true
+          }
+
+          Repeater {
+            model: root.modelRows(root.activeProvider)
+            delegate: Column {
+              required property var modelData
+              width: parent.width
+              spacing: Style.space(2)
+
+              RowLayout {
+                width: parent.width
+                Text {
+                  Layout.fillWidth: true
+                  text: modelData.name
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  elide: Text.ElideRight
+                }
+                Text {
+                  text: Model.tokenCount(modelData.total) + " · " + root.formatCost(modelData.cost)
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+
+              Text {
+                width: parent.width
+                text: root.modelDetail(modelData)
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideRight
+              }
+            }
+          }
+
+          Text {
+            width: parent.width
+          text: "Estimated API equivalent · not a subscription charge"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
         }
 
         Text {
@@ -290,7 +411,7 @@ Panel {
         spacing: Style.space(2)
 
         Text {
-          text: card.provider.id === "claude" ? "Claude" : "Codex"
+          text: root.providerLabel(card.provider)
           color: card.behind ? root.urgent : root.foreground
           font.family: root.fontFamily
           font.pixelSize: Style.font.title
