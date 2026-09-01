@@ -148,7 +148,7 @@ Panel {
 
       ProviderIcon {
         source: Qt.resolvedUrl("ai-robot.svg")
-        tinted: true
+        tinted: false
         iconSize: Style.space(18)
       }
     }
