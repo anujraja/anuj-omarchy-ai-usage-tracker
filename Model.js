@@ -133,6 +133,15 @@ function countdown(resetMs, nowMs) {
   return mins + "m"
 }
 
+function remainingHeadline(weekly, nowMs, plan) {
+  if (!weekly) return ""
+  var text = percent(weekly.remaining) + " remaining"
+  var reset = countdown(weekly.resetMs, nowMs)
+  if (reset) text += " · resets in " + reset
+  if (plan) text += " · " + plan
+  return text
+}
+
 function paceText(weekly, nowMs) {
   if (!weekly) return "No weekly limit"
   var points = Math.round(Math.abs(paceDifference(weekly, nowMs)) * 100)
