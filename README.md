@@ -1,6 +1,6 @@
 # Anuj Omarchy AI Usage Tracker
 
-An Omarchy bar plugin with one neutral AI icon and tabbed Claude, Codex, and Grok usage.
+An Omarchy bar plugin with the same themed agents glyph as the built-in Omarchy Agents widget, plus tabbed Claude, Codex, and Grok usage.
 
 ## Screenshots
 
@@ -16,7 +16,7 @@ Popup tabs, cropped directly from display 0:
 
 ## What it shows
 
-The bar shows a single neutral AI icon. Open it for provider tabs, weekly allowance, reset countdowns, token usage, and API-equivalent estimates:
+The bar uses Omarchy's built-in agents icon so it matches the other status-bar glyphs. Open it for provider tabs, weekly allowance, reset countdowns, token usage, and API-equivalent estimates:
 
 ```text
 Claude | Codex | Grok

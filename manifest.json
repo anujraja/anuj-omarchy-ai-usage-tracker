@@ -12,7 +12,7 @@
   "entryPoints": {
     "barWidget": "Panel.qml"
   },
-  "assets": ["ai-robot.svg", "claude.svg", "codex.svg"],
+  "assets": ["claude.svg", "codex.svg"],
   "barWidget": {
     "displayName": "Anuj Omarchy AI Usage Tracker",
     "description": "One AI usage icon with Claude, Codex, and Grok tabs plus model token usage and estimates.",

@@ -127,30 +127,16 @@ Panel {
       + " · out " + Model.tokenCount(row.output)
   }
 
-  WidgetButton {
+  BarIconButton {
     id: usageButton
     anchors.fill: parent
     bar: root.bar
-    labelVisible: false
-    hasVisualContent: true
-    fixedWidth: vertical ? -1 : barContent.implicitWidth + Style.space(16)
+    text: "󱚣"
     tooltipText: "Weekly allowance used · click for details"
     active: root.alarming
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton || buttonCode === Qt.MiddleButton) root.refresh()
       else root.toggle()
-    }
-
-    Row {
-      id: barContent
-      anchors.centerIn: parent
-      spacing: Style.space(12)
-
-      ProviderIcon {
-        source: Qt.resolvedUrl("ai-robot.svg")
-        tinted: false
-        iconSize: Style.space(18)
-      }
     }
   }
 
