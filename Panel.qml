@@ -43,8 +43,22 @@ Panel {
   }
 
   function providerIcon(provider) {
-    return provider && provider.id === "claude"
-      ? Qt.resolvedUrl("claude.svg") : Qt.resolvedUrl("codex.svg")
+    if (!provider) return ""
+    if (provider.id === "claude") return Qt.resolvedUrl("claude.svg")
+    if (provider.id === "codex") return Qt.resolvedUrl("codex.svg")
+    return ""
+  }
+
+  function tabLabel(provider) {
+    var name = root.providerLabel(provider)
+    if (provider && provider.weekly) return name + " · " + Model.percent(provider.weekly.remaining)
+    return name
+  }
+
+  function remainingText(provider) {
+    if (provider && provider.weekly)
+      return Model.remainingHeadline(provider.weekly, root.nowMs, provider.plan)
+    return (provider && provider.status) ? provider.status : "Plan remaining unavailable"
   }
 
   onOpenedChanged: if (opened) {
@@ -201,7 +215,7 @@ Panel {
               border.width: 1
               Text {
                 anchors.centerIn: parent
-                text: root.providerLabel(modelData)
+                text: root.tabLabel(modelData)
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
@@ -219,7 +233,7 @@ Panel {
           width: parent.width
           provider: root.activeProvider
           iconSource: root.providerIcon(root.activeProvider)
-          tintIcon: root.activeProvider && root.activeProvider.id !== "claude"
+          tintIcon: root.activeProvider && root.activeProvider.id === "codex"
         }
 
         Column {
@@ -385,6 +399,7 @@ Panel {
       spacing: Style.space(9)
 
       ProviderIcon {
+        visible: String(card.iconSource) !== ""
         anchors.verticalCenter: parent.verticalCenter
         source: card.iconSource
         tinted: card.tintIcon
@@ -405,12 +420,12 @@ Panel {
         }
 
         Text {
-          text: card.weekly
-            ? Model.percent(card.weekly.used) + " used · resets in " + Model.countdown(card.weekly.resetMs, root.nowMs)
-            : (card.provider.status || "Weekly limit unavailable")
+          text: root.remainingText(card.provider)
           color: card.behind ? root.urgent : root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
+          wrapMode: Text.WordWrap
+          width: parent.width
         }
       }
     }

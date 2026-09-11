@@ -7,9 +7,9 @@ Item {
   id: root
 
   property var settings: ({})
-  property var claude: ({ id: "claude", name: "Claude", weekly: null, limits: [], modelUsage: {}, recentDays: [], status: "Loading…" })
-  property var codex: ({ id: "codex", name: "Codex", weekly: null, limits: [], modelUsage: {}, recentDays: [], status: "Loading…" })
-  property var grok: ({ id: "grok", name: "Grok", weekly: null, limits: [], modelUsage: {}, recentDays: [], status: "Loading…" })
+  property var claude: emptyProvider("claude", "Claude")
+  property var codex: emptyProvider("codex", "Codex")
+  property var grok: emptyProvider("grok", "Grok")
   property bool refreshing: false
   property string lastError: ""
   property date lastUpdated: new Date(0)
@@ -18,9 +18,23 @@ Item {
   property string _claudeError: ""
   property string _codexOutput: ""
   property string _codexError: ""
+  property string _grokOutput: ""
+  property string _grokError: ""
 
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 300, 60, 3600)
-  readonly property string grokRecord: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") || "") + "/.local/state") + "/omarchy/agents/usage/grok.json"
+  readonly property string home: Quickshell.env("HOME") || ""
+  readonly property string usageDir: (Quickshell.env("XDG_STATE_HOME") || home + "/.local/state") + "/omarchy/agents/usage"
+  readonly property string grokCollector: localPath("collect-grok")
+
+  function emptyProvider(id, name) {
+    return { id: id, name: name, weekly: null, limits: [], modelUsage: {}, recentDays: [], status: "Loading…" }
+  }
+
+  function localPath(name) {
+    var url = String(Qt.resolvedUrl(name) || "")
+    if (url.indexOf("file://") === 0) url = url.slice(7)
+    return url
+  }
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
@@ -33,39 +47,31 @@ Item {
     return Math.max(minimum, Math.min(maximum, value))
   }
 
-  function loadGrok(content) {
-    var parsed = Model.parseProvider(String(content || ""), "grok", Date.now())
-    if (parsed.ok) root.grok = parsed.provider
+  function setProvider(kind, value) {
+    if (kind === "codex") root.codex = value
+    else if (kind === "grok") root.grok = value
+    else root.claude = value
   }
 
-  FileView {
-    path: root.grokRecord
-    watchChanges: true
-    printErrors: false
-    onLoaded: root.loadGrok(text())
-    onFileChanged: reload()
+  function providerFor(kind) {
+    if (kind === "codex") return root.codex
+    if (kind === "grok") return root.grok
+    return root.claude
+  }
+
+  function applyRecord(kind, content, fallbackStatus) {
+    var parsed = Model.parseProvider(String(content || ""), kind, Date.now())
+    if (!parsed.ok) {
+      if (fallbackStatus) root.setProvider(kind, Object.assign({}, root.providerFor(kind), { status: fallbackStatus }))
+      return false
+    }
+    root.setProvider(kind, parsed.provider)
+    return true
   }
 
   function conciseError(value, fallback) {
     var text = String(value || fallback || "Usage request failed").replace(/\s+/g, " ").trim()
     return text.length > 180 ? text.substring(0, 177) + "…" : text
-  }
-
-  function refresh() {
-    if (refreshing || claudeProcess.running || codexProcess.running) return
-    refreshing = true
-    lastError = ""
-    _pending = 2
-    _claudeOutput = ""
-    _claudeError = ""
-    _codexOutput = ""
-    _codexError = ""
-    claudeProcess.command = ["omarchy-agent-usage-claude", "--limits-only"]
-    // Omarchy's packaged collector still passes the removed `untrusted`
-    // approval policy. Use the user compatibility collector explicitly.
-    codexProcess.command = ["/home/airking/.local/bin/omarchy-agent-usage-codex", "--limits-only"]
-    claudeProcess.running = true
-    codexProcess.running = true
   }
 
   function finishOne() {
@@ -74,6 +80,52 @@ Item {
       refreshing = false
       lastUpdated = new Date()
     }
+  }
+
+  function refresh() {
+    if (claudeProcess.running || codexProcess.running || grokProcess.running) return
+    refreshing = true
+    lastError = ""
+    _pending = 3
+    _claudeOutput = ""
+    _claudeError = ""
+    _codexOutput = ""
+    _codexError = ""
+    _grokOutput = ""
+    _grokError = ""
+    claudeProcess.command = ["omarchy-agent-usage-claude", "--limits-only"]
+    codexProcess.command = ["omarchy-agent-usage-codex", "--limits-only"]
+    grokProcess.command = ["python3", root.grokCollector, "--limits-only"]
+    claudeProcess.running = true
+    codexProcess.running = true
+    grokProcess.running = true
+  }
+
+  FileView {
+    path: root.usageDir + "/claude.json"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.applyRecord("claude", text())
+    onFileChanged: reload()
+    onLoadFailed: if (!root.claude.weekly) root.claude = Object.assign({}, root.claude, { status: "Waiting for Claude usage" })
+  }
+
+  FileView {
+    path: root.usageDir + "/codex.json"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.applyRecord("codex", text())
+    onFileChanged: reload()
+    onLoadFailed: if (!root.codex.weekly) root.codex = Object.assign({}, root.codex, { status: "Waiting for Codex usage" })
+  }
+
+  FileView {
+    path: root.usageDir + "/grok.json"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.applyRecord("grok", text())
+    onFileChanged: reload()
+    onLoadFailed: if (!root.grok.weekly) root.grok = Object.assign({}, root.grok, { status: "Waiting for Grok usage" })
   }
 
   Timer {
@@ -101,16 +153,11 @@ Item {
     onExited: function(exitCode) {
       var stdout = String(claudeStdout.text || root._claudeOutput || "")
       var stderr = String(claudeStderr.text || root._claudeError || "")
-      if (exitCode !== 0) {
+      if (exitCode !== 0 && !root.applyRecord("claude", stdout)) {
         root.claude = Object.assign({}, root.claude, { status: root.conciseError(stderr || stdout, "Could not load Claude usage") })
-        root.lastError = root.claude.status
-      } else {
-        var parsed = Model.parseProvider(stdout, "claude", Date.now())
-        if (parsed.ok) root.claude = parsed.provider
-        else {
-          root.claude = Object.assign({}, root.claude, { status: parsed.error })
-          root.lastError = parsed.error
-        }
+        if (!root.claude.weekly) root.lastError = root.claude.status
+      } else if (stdout !== "") {
+        root.applyRecord("claude", stdout, root.conciseError(stderr, "Could not parse Claude usage"))
       }
       root.finishOne()
     }
@@ -133,16 +180,36 @@ Item {
     onExited: function(exitCode) {
       var stdout = String(codexStdout.text || root._codexOutput || "")
       var stderr = String(codexStderr.text || root._codexError || "")
-      if (exitCode !== 0) {
+      if (exitCode !== 0 && !root.applyRecord("codex", stdout)) {
         root.codex = Object.assign({}, root.codex, { status: root.conciseError(stderr || stdout, "Could not load Codex usage") })
-        root.lastError = root.codex.status
-      } else {
-        var parsed = Model.parseProvider(stdout, "codex", Date.now())
-        if (parsed.ok) root.codex = parsed.provider
-        else {
-          root.codex = Object.assign({}, root.codex, { status: parsed.error })
-          root.lastError = parsed.error
-        }
+        if (!root.codex.weekly) root.lastError = root.codex.status
+      } else if (stdout !== "") {
+        root.applyRecord("codex", stdout, root.conciseError(stderr, "Could not parse Codex usage"))
+      }
+      root.finishOne()
+    }
+  }
+
+  Process {
+    id: grokProcess
+    running: false
+    command: []
+    stdout: StdioCollector {
+      id: grokStdout
+      waitForEnd: true
+      onStreamFinished: root._grokOutput = text
+    }
+    stderr: StdioCollector {
+      id: grokStderr
+      waitForEnd: true
+      onStreamFinished: root._grokError = text
+    }
+    onExited: function(exitCode) {
+      var stdout = String(grokStdout.text || root._grokOutput || "")
+      var stderr = String(grokStderr.text || root._grokError || "")
+      if (!root.applyRecord("grok", stdout)) {
+        root.grok = Object.assign({}, root.grok, { status: root.conciseError(stderr || stdout, "Could not load Grok usage") })
+        if (!root.grok.weekly) root.lastError = root.grok.status
       }
       root.finishOne()
     }

@@ -1,0 +1,403 @@
+#!/usr/bin/python3
+"""Collect Grok Build plan remaining into an Omarchy usage record.
+
+Works on any Omarchy machine with a logged-in `grok` CLI. Reads the same
+~/.grok/auth.json the CLI uses, refreshes the OIDC token when it has expired,
+and prints one JSON record. Also writes ~/.local/state/omarchy/agents/usage/grok.json
+so the bar can watch the file like Claude and Codex.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import fcntl
+import json
+import os
+import sys
+import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+AGENT_ID = "grok"
+AGENT_NAME = "Grok"
+AUTH_HELP = "Run `grok login` to authenticate."
+PROXY_BASE = os.environ.get("GROK_CLI_CHAT_PROXY_BASE_URL", "https://cli-chat-proxy.grok.com/v1").rstrip("/")
+TOKEN_URL = "https://auth.x.ai/oauth2/token"
+REFRESH_SKEW = dt.timedelta(seconds=60)
+
+
+def grok_home() -> Path:
+  return Path(os.environ.get("GROK_HOME") or (Path.home() / ".grok")).expanduser()
+
+
+def usage_dir() -> Path:
+  state = Path(os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local/state"))
+  return state / "omarchy" / "agents" / "usage"
+
+
+def now_utc() -> dt.datetime:
+  return dt.datetime.now(dt.timezone.utc)
+
+
+def parse_iso(value: str) -> dt.datetime | None:
+  text = str(value or "").strip()
+  if not text:
+    return None
+  text = text.replace("Z", "+00:00")
+  if "." in text:
+    head, rest = text.split(".", 1)
+    frac = ""
+    tz = ""
+    for i, ch in enumerate(rest):
+      if ch.isdigit():
+        frac += ch
+      else:
+        tz = rest[i:]
+        break
+    text = head + "." + frac[:6].ljust(6, "0") + tz
+  try:
+    parsed = dt.datetime.fromisoformat(text)
+  except ValueError:
+    return None
+  if parsed.tzinfo is None:
+    parsed = parsed.replace(tzinfo=dt.timezone.utc)
+  return parsed.astimezone(dt.timezone.utc)
+
+
+def jwt_exp(token: str) -> dt.datetime | None:
+  try:
+    import base64
+
+    payload = token.split(".")[1]
+    payload += "=" * (-len(payload) % 4)
+    claims = json.loads(base64.urlsafe_b64decode(payload))
+    return dt.datetime.fromtimestamp(int(claims["exp"]), dt.timezone.utc)
+  except Exception:
+    return None
+
+
+def record(
+  *,
+  ready: bool,
+  status: str = "",
+  help_text: str = AUTH_HELP,
+  tier: str = "",
+  used: float | None = None,
+  resets_at: str = "",
+  model_usage: dict[str, Any] | None = None,
+  recent_days: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+  limits = []
+  if used is not None:
+    limits.append({
+      "label": "Weekly (7-day)",
+      "title": "Weekly",
+      "percent": max(0.0, min(1.0, used)),
+      "resetsAt": resets_at,
+    })
+  return {
+    "schemaVersion": 1,
+    "id": AGENT_ID,
+    "name": AGENT_NAME,
+    "updatedAt": now_utc().isoformat(),
+    "ready": ready,
+    "hasLocalStats": bool(model_usage or recent_days),
+    "tierLabel": tier,
+    "usageStatusText": status,
+    "authHelpText": help_text,
+    "limits": limits,
+    "todayPrompts": 0,
+    "todaySessions": 0,
+    "todayTotalTokens": 0,
+    "todayTokensByModel": {},
+    "recentDays": recent_days or [],
+    "totalPrompts": 0,
+    "totalSessions": 0,
+    "activeDays": 0,
+    "activeDates": [],
+    "modelUsage": model_usage or {},
+  }
+
+
+def emit(payload: dict[str, Any]) -> int:
+  text = json.dumps(payload, separators=(",", ":"))
+  sys.stdout.write(text + "\n")
+  try:
+    folder = usage_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=".grok.", dir=folder)
+    with os.fdopen(fd, "w") as handle:
+      handle.write(text + "\n")
+    os.replace(tmp_name, folder / "grok.json")
+  except OSError as exc:
+    print(f"collect-grok: could not write usage file: {exc}", file=sys.stderr)
+  return 0 if payload.get("ready") else 1
+
+
+def pick_auth_entry(data: Any) -> tuple[str, dict[str, Any]] | None:
+  if not isinstance(data, dict):
+    return None
+  preferred = []
+  fallback = []
+  for key, value in data.items():
+    if not isinstance(value, dict) or not value.get("key"):
+      continue
+    item = (str(key), value)
+    if str(key).startswith("https://auth.x.ai::"):
+      preferred.append(item)
+    else:
+      fallback.append(item)
+  if preferred:
+    return preferred[0]
+  if fallback:
+    return fallback[0]
+  return None
+
+
+def token_expired(entry: dict[str, Any]) -> bool:
+  token = str(entry.get("key") or "")
+  expires = parse_iso(str(entry.get("expires_at") or "")) or jwt_exp(token)
+  if expires is None:
+    return False
+  return expires <= now_utc() + REFRESH_SKEW
+
+
+def persist_auth(path: Path, data: dict[str, Any]) -> None:
+  encoded = json.dumps(data, indent=2) + "\n"
+  fd, tmp_name = tempfile.mkstemp(prefix=".auth.", suffix=".tmp", dir=path.parent)
+  try:
+    with os.fdopen(fd, "w") as handle:
+      handle.write(encoded)
+    os.chmod(tmp_name, 0o600)
+    os.replace(tmp_name, path)
+  except Exception:
+    try:
+      os.unlink(tmp_name)
+    except OSError:
+      pass
+    raise
+
+
+def refresh_entry(entry: dict[str, Any]) -> str | None:
+  refresh_token = str(entry.get("refresh_token") or "")
+  client_id = str(entry.get("oidc_client_id") or "")
+  if not refresh_token or not client_id:
+    return "Sign in with `grok login` (no refresh token)."
+  body = {
+    "grant_type": "refresh_token",
+    "refresh_token": refresh_token,
+    "client_id": client_id,
+  }
+  if str(entry.get("principal_type") or "") and str(entry.get("principal_id") or ""):
+    body["principal_type"] = str(entry["principal_type"])
+    body["principal_id"] = str(entry["principal_id"])
+  req = urllib.request.Request(
+    TOKEN_URL,
+    data=urllib.parse.urlencode(body).encode(),
+    headers={
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Accept": "application/json",
+    },
+    method="POST",
+  )
+  try:
+    with urllib.request.urlopen(req, timeout=15) as resp:
+      payload = json.load(resp)
+  except urllib.error.HTTPError as exc:
+    detail = exc.read()[:200].decode("utf-8", "replace")
+    return f"Grok login expired. Run `grok login`. ({exc.code} {detail})"
+  except Exception as exc:
+    return f"Could not refresh Grok login: {exc}"
+  access = str(payload.get("access_token") or "")
+  if not access:
+    return "Grok login refresh returned no access token. Run `grok login`."
+  entry["key"] = access
+  if payload.get("refresh_token"):
+    entry["refresh_token"] = payload["refresh_token"]
+  expires_in = payload.get("expires_in")
+  try:
+    seconds = int(expires_in)
+  except (TypeError, ValueError):
+    seconds = 0
+  if seconds > 0:
+    entry["expires_at"] = (now_utc() + dt.timedelta(seconds=seconds)).isoformat()
+  return None
+
+
+def load_auth() -> tuple[str | None, str]:
+  path = grok_home() / "auth.json"
+  if not path.is_file():
+    return None, "Not signed in to Grok. Run `grok login`."
+  try:
+    handle = path.open("r+")
+  except OSError as exc:
+    return None, f"Could not read {path}: {exc}"
+  with handle:
+    try:
+      fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+      handle.seek(0)
+      data = json.load(handle)
+    except Exception as exc:
+      return None, f"Could not parse {path}: {exc}"
+    picked = pick_auth_entry(data)
+    if not picked:
+      return None, "No Grok login in ~/.grok/auth.json. Run `grok login`."
+    _key, entry = picked
+    if token_expired(entry):
+      error = refresh_entry(entry)
+      if error:
+        return None, error
+      try:
+        persist_auth(path, data)
+      except OSError as exc:
+        return None, f"Refreshed Grok login but could not save it: {exc}"
+    token = str(entry.get("key") or "")
+    if not token:
+      return None, AUTH_HELP
+    return token, ""
+
+
+def api_get(path: str, token: str) -> tuple[Any | None, str]:
+  req = urllib.request.Request(
+    PROXY_BASE + path,
+    headers={
+      "Authorization": "Bearer " + token,
+      "Accept": "application/json",
+      "X-XAI-Token-Auth": "xai-grok-cli",
+    },
+  )
+  try:
+    with urllib.request.urlopen(req, timeout=15) as resp:
+      return json.load(resp), ""
+  except urllib.error.HTTPError as exc:
+    body = exc.read()[:240].decode("utf-8", "replace")
+    if exc.code in (401, 403):
+      return None, "Grok login was rejected. Run `grok` once to refresh it, or `grok login`."
+    return None, f"Grok usage request failed (HTTP {exc.code}): {body}"
+  except Exception as exc:
+    return None, f"Grok usage request failed: {exc}"
+
+
+def used_fraction(value: Any) -> float | None:
+  try:
+    amount = float(value)
+  except (TypeError, ValueError):
+    return None
+  if amount < 0:
+    return 0.0
+  # The CLI billing endpoint reports percent used on a 0-100 scale
+  # (`1.0` is 1%, `55` is 55%). Omarchy records store 0-1 fractions.
+  return min(1.0, amount / 100.0)
+
+
+def recent_date_strings() -> list[str]:
+  today = dt.datetime.now().date()
+  return [(today - dt.timedelta(days=offset)).isoformat() for offset in range(6, -1, -1)]
+
+
+def scan_local_usage() -> tuple[dict[str, Any], list[dict[str, Any]]]:
+  models: dict[str, dict[str, int]] = {}
+  by_day = {day: 0 for day in recent_date_strings()}
+  sessions = grok_home() / "sessions"
+  if not sessions.is_dir():
+    return {}, [{"date": day, "messageCount": 0} for day in recent_date_strings()]
+  for usage_file in sessions.rglob("usage.json"):
+    try:
+      payload = json.loads(usage_file.read_text())
+    except Exception:
+      continue
+    session = payload.get("session") if isinstance(payload.get("session"), dict) else payload
+    if not isinstance(session, dict):
+      continue
+    usage = session.get("modelUsage") if isinstance(session.get("modelUsage"), dict) else {}
+    for model_id, bucket in usage.items():
+      if not isinstance(bucket, dict):
+        continue
+      dest = models.setdefault(str(model_id), {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+      })
+      dest["inputTokens"] += int(bucket.get("inputTokens") or 0)
+      dest["outputTokens"] += int(bucket.get("outputTokens") or 0)
+      dest["cacheReadInputTokens"] += int(bucket.get("cachedReadTokens") or bucket.get("cacheReadInputTokens") or 0)
+      dest["cacheCreationInputTokens"] += int(bucket.get("cacheCreationTokens") or bucket.get("cacheCreationInputTokens") or 0)
+    stamp = parse_iso(str(payload.get("updatedAt") or session.get("updatedAt") or ""))
+    day = stamp.astimezone().date().isoformat() if stamp else dt.datetime.now().date().isoformat()
+    if day in by_day:
+      by_day[day] += int(session.get("totalTokens") or 0)
+  recent = [{"date": day, "messageCount": by_day[day]} for day in recent_date_strings()]
+  return models, recent
+
+
+def friendly_tier(value: str) -> str:
+  text = str(value or "").strip()
+  if not text:
+    return ""
+  out = []
+  for i, ch in enumerate(text):
+    if i and ch.isupper() and text[i - 1].islower():
+      out.append(" ")
+    out.append(ch)
+  return "".join(out)
+
+
+def collect() -> dict[str, Any]:
+  token, error = load_auth()
+  models, recent = scan_local_usage()
+  if error or not token:
+    return record(ready=False, status=error or AUTH_HELP, help_text=error or AUTH_HELP, model_usage=models, recent_days=recent)
+
+  billing, billing_error = api_get("/billing?format=credits", token)
+  user, user_error = api_get("/user?include=subscription", token)
+  if billing_error and not billing:
+    return record(ready=False, status=billing_error, help_text=AUTH_HELP, model_usage=models, recent_days=recent)
+
+  cfg = billing.get("config", billing) if isinstance(billing, dict) else {}
+  period = cfg.get("currentPeriod") if isinstance(cfg.get("currentPeriod"), dict) else {}
+  used = used_fraction(cfg.get("creditUsagePercent"))
+  if used is None:
+    products = cfg.get("productUsage") if isinstance(cfg.get("productUsage"), list) else []
+    for product in products:
+      if isinstance(product, dict) and str(product.get("product") or "") in ("GrokBuild", "Grok"):
+        used = used_fraction(product.get("usagePercent"))
+        if used is not None:
+          break
+  resets_at = str(period.get("end") or cfg.get("billingPeriodEnd") or "")
+  tier = ""
+  if isinstance(user, dict):
+    tier = friendly_tier(str(user.get("subscriptionTier") or ""))
+  status = ""
+  if user_error and not tier:
+    status = user_error
+  return record(
+    ready=used is not None or bool(tier),
+    status=status,
+    help_text="",
+    tier=tier,
+    used=used,
+    resets_at=resets_at,
+    model_usage=models,
+    recent_days=recent,
+  )
+
+
+def main() -> int:
+  parser = argparse.ArgumentParser(description="Print the Grok usage record as JSON")
+  parser.add_argument("--force", action="store_true")
+  parser.add_argument("--limits-only", action="store_true")
+  parser.parse_args()
+  try:
+    payload = collect()
+  except Exception as exc:
+    payload = record(ready=False, status=f"Could not load Grok usage: {exc}")
+  return emit(payload)
+
+
+if __name__ == "__main__":
+  raise SystemExit(main())

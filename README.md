@@ -1,44 +1,42 @@
 # Anuj Omarchy AI Usage Tracker
 
-An Omarchy bar plugin with the same themed agents glyph as the built-in Omarchy Agents widget, plus tabbed Claude, Codex, and Grok usage.
+An Omarchy bar plugin that shows how much of each AI plan is remaining. It uses
+the same themed agents glyph as the built-in Omarchy Agents widget, with tabs
+for Claude, Codex, and Grok.
 
-## Screenshots
-
-Clean captures from display 0:
-
-![Neutral AI usage icon in the Omarchy top bar](docs/screenshots/ai-usage-topbar.png)
-
-Popup tabs, cropped directly from display 0:
-
-| Claude | Codex | Grok |
-|---|---|---|
-| ![Claude usage tab](docs/screenshots/ai-usage-claude.png) | ![Codex usage tab](docs/screenshots/ai-usage-codex.png) | ![Grok usage tab](docs/screenshots/ai-usage-grok.png) |
+Works on any Omarchy machine. There are no hardcoded home directories or
+host-specific collector paths.
 
 ## What it shows
 
-The bar uses Omarchy's built-in agents icon so it matches the other status-bar glyphs. Open it for provider tabs, weekly allowance, reset countdowns, token usage, and API-equivalent estimates:
+Each tab leads with **percent remaining**, the plan name, and when the window
+resets. Open the panel for meters, pace, a seven-day token chart, and
+API-equivalent estimates.
 
 ```text
-Claude | Codex | Grok
+Claude · 82%   Codex · 98%   Grok · 99%
 ```
 
-A provider turns red when its usage exceeds the prorated portion of its seven-day window. For example, with 70% of the week elapsed, 76% used is behind pace while 58% used is ahead.
+A provider turns red when usage exceeds the prorated portion of its seven-day
+window.
 
-Click the bar display for detailed meters, expected remaining allowance, pace difference, a seven-day token chart, and additional limit windows. Right-click or middle-click to refresh immediately.
-
-The installed local version also shows Codex **tokens by model** with input,
-cached, and output totals. It includes an **API-equivalent cost estimate** for
-known models using current USD per-million-token reference rates. This is an
-estimate only: ChatGPT/Codex subscription usage is not the same as an API bill,
-and unknown model IDs are shown as `n/a`.
+- Left-click the bar icon to open or close details.
+- Right-click or middle-click to refresh.
+- Press `R` while the panel is open to refresh.
+- Press Escape to close.
 
 ## Requirements
 
-- Omarchy with Quickshell plugin support.
-- Authenticated Claude Code and Codex CLIs.
-- Omarchy's `omarchy-agent-usage-claude` and `omarchy-agent-usage-codex` collectors.
+- Omarchy with Quickshell plugins. Claude and Codex use the collectors Omarchy
+  already ships (`omarchy-agent-usage-claude` and `omarchy-agent-usage-codex`
+  on `PATH`).
+- Claude Code signed in (`claude auth login`) for Claude remaining.
+- Codex CLI signed in (`codex login`) for Codex remaining.
+- Grok CLI signed in (`grok login`) for Grok remaining. The plugin reads the
+  same `~/.grok/auth.json` the CLI uses and refreshes the token when needed.
 
-The plugin runs each collector with `--limits-only`. It uses the credentials already managed by the provider CLIs and does not read or store credentials.
+The plugin does not read or store provider passwords. It uses credentials the
+CLIs already manage.
 
 ## Installation
 
@@ -46,26 +44,13 @@ The plugin runs each collector with `--limits-only`. It uses the credentials alr
 omarchy plugin add https://github.com/anujraja/anuj-omarchy-ai-usage-tracker.git --enable
 ```
 
-For a local checkout:
-
-```bash
-omarchy plugin add ~/code/anuj-omarchy-ai-usage-tracker --enable
-```
-
-Disable Omarchy's built-in Agents display if both widgets appear:
+Then hide the stock Agents widget if both icons appear:
 
 ```bash
 omarchy plugin disable omarchy.agents
 ```
 
-## Usage
-
-- Left-click the bar display to open or close details.
-- Right-click or middle-click to refresh.
-- Press `R` while the panel is open to refresh.
-- Press Escape to close the panel.
-
-The plugin refreshes every five minutes by default. Change the interval with:
+The plugin refreshes every five minutes by default:
 
 ```bash
 omarchy bar set anuj-omarchy-ai-usage-tracker refreshIntervalSec 600 --json
@@ -73,15 +58,8 @@ omarchy bar set anuj-omarchy-ai-usage-tracker refreshIntervalSec 600 --json
 
 ## Removal
 
-Remove the plugin with:
-
 ```bash
 omarchy plugin remove anuj-omarchy-ai-usage-tracker
-```
-
-Restore Omarchy's built-in Agents display if desired:
-
-```bash
 omarchy plugin enable omarchy.agents
 ```
 

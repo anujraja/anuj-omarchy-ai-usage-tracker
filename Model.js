@@ -63,26 +63,36 @@ function normalizeLimit(limit, nowMs) {
   }
 }
 
+function friendlyPlanName(value) {
+  var text = String(value || "").trim()
+  if (!text) return ""
+  var out = text.replace(/[_-]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2")
+  return out.charAt(0).toUpperCase() + out.slice(1)
+}
+
 function parseProvider(stdout, providerId, nowMs) {
   try {
     var raw = JSON.parse(String(stdout || ""))
     var limits = Array.isArray(raw.limits) ? raw.limits : []
     var weekly = normalizeLimit(findWeekly(limits), nowMs)
+    if (!weekly && limits.length === 1) weekly = normalizeLimit(limits[0], nowMs)
     var normalized = []
     for (var i = 0; i < limits.length; i++) {
       var item = normalizeLimit(limits[i], nowMs)
       if (item) normalized.push(item)
     }
+    var plan = friendlyPlanName(raw.plan || raw.tierLabel || "")
+    var status = String(raw.usageStatusText || "")
+    if (!status && !weekly && String(raw.authHelpText || "") !== "") status = String(raw.authHelpText)
     return {
       ok: true,
       provider: {
         id: String(providerId || raw.id || ""),
         name: String(raw.name || providerId || ""),
-        plan: String(raw.plan || raw.tierLabel || ""),
-        status: String(raw.usageStatusText || ""),
+        plan: plan,
+        status: status,
         weekly: weekly,
         limits: normalized,
-        modelUsage: raw.modelUsage || {},
         modelUsage: raw.modelUsage || {},
         recentDays: Array.isArray(raw.recentDays) ? raw.recentDays : [],
         updatedAt: String(raw.updatedAt || "")
@@ -180,6 +190,8 @@ var exportsObject = {
   tokenCount: tokenCount,
   dayLabel: dayLabel,
   friendlyModelName: friendlyModelName,
+  friendlyPlanName: friendlyPlanName,
+  remainingHeadline: remainingHeadline,
   estimateApiCost: estimateApiCost
 }
 

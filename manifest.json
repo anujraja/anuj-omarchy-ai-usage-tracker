@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "anuj-omarchy-ai-usage-tracker",
   "name": "Anuj Omarchy AI Usage Tracker",
-  "version": "0.1.0",
-  "author": "Rob Zolkos",
+  "version": "0.2.0",
+  "author": "Anuj Raja",
   "license": "MIT",
-  "description": "Tabbed Claude, Codex, and Grok usage, limits, tokens by model, and API-equivalent estimates in one Omarchy bar icon.",
+  "description": "Claude, Codex, and Grok plan remaining in one Omarchy bar icon. Portable: uses Omarchy collectors on PATH plus the local grok CLI login.",
   "kinds": [
     "bar-widget"
   ],
@@ -15,7 +15,7 @@
   "assets": ["claude.svg", "codex.svg"],
   "barWidget": {
     "displayName": "Anuj Omarchy AI Usage Tracker",
-    "description": "One AI usage icon with Claude, Codex, and Grok tabs plus model token usage and estimates.",
+    "description": "Plan remaining for Claude, Codex, and Grok, with reset countdowns and token breakdowns.",
     "category": "AI",
     "aliases": [
       "agent-usage",
